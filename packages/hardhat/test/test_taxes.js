@@ -1,0 +1,1 @@
+// Test zil contract in case can't connect

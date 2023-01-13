@@ -1,0 +1,148 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+pragma solidity ^0.8.6;
+
+import {ERC165} from "@openzeppelin/contracts/utils/introspection/ERC165.sol";
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {Counters} from "@openzeppelin/contracts/utils/Counters.sol";
+
+import {IERC721Metadata} from "./interfaces/IERC721Metadata.sol";
+import {IPluralProperty} from "./interfaces/IPluralProperty.sol";
+// import {Perwei, Period, Harberger} from "./Harberger.sol";
+
+import "./Harberger.sol";
+
+struct Assessment {
+  address seller;
+  uint256 startBlock;
+  uint256 collateral;
+  Perwei taxRate;
+}
+
+contract PluralProperty is ERC165, IERC721Metadata, IPluralProperty, Harberger {
+  using Strings for uint256;
+  using Counters for Counters.Counter;
+
+  Counters.Counter private _tokenIds;
+  string private _name;
+  string private _symbol;
+  string private _baseURI;
+
+  mapping(uint256 => address) public _owners;
+  mapping(uint256 => Assessment) public _assessments;
+  mapping(uint256 => string) public _tokenURIs;
+
+  constructor(
+    string memory name_,
+    string memory symbol_,
+    string memory baseURI_
+  ) {
+    _name = name_;   // 
+    _symbol = symbol_;
+    _baseURI = baseURI_;
+  }
+
+  function supportsInterface(
+    bytes4 interfaceId
+  ) public view virtual override(ERC165) returns (bool) {
+    return
+      interfaceId == type(IERC721Metadata).interfaceId ||
+      super.supportsInterface(interfaceId);
+  }
+
+  function name() external view virtual override returns (string memory) {
+    return _name;
+  }
+
+  function symbol() external view virtual override returns (string memory) {
+    return _symbol;
+  }
+
+  function baseURI() external view virtual returns (string memory) {
+    return _baseURI;
+  }
+
+  function setBaseURI(string memory newBaseURI) external virtual {
+    _baseURI = newBaseURI;
+  }
+
+  function getLatestTokenId() public view returns (uint256){
+    return _tokenIds.current();
+  }
+
+  function incrementTokenId() public {
+    _tokenIds.increment();
+  }
+
+  function _exists(uint256 tokenId) internal view virtual returns (bool) {
+    return _owners[tokenId] != address(0);
+  }
+
+  function ownerOf(uint256 tokenId) external view virtual returns (address) {
+    address owner = _owners[tokenId];
+    require(owner != address(0), "ownerOf: token doesn't exist");
+    return owner;
+  }
+
+  function tokenURI(
+    uint256 tokenId
+  ) external view virtual override returns (string memory) {
+    require(_exists(tokenId), "tokenURI: token doesn't exist");
+    return _tokenURIs[tokenId];
+  }
+
+  function _setTokenURI(
+    uint256 _tokenId,
+    string memory _tokenURI
+  ) internal virtual {
+    require(_exists(_tokenId), "_setTokenURI: token doesn't exist");
+    _tokenURIs[_tokenId] = _tokenURI;
+  }
+
+  function getAssessment(
+    uint256 tokenId
+  ) public view virtual returns (Assessment memory assessment) {
+    require(_exists(tokenId), "getAssessment: token doesn't exist");
+    assessment = _assessments[tokenId];
+  }
+
+  function setBaseTaxRate(uint256 tokenId, Perwei memory nextTaxRate) external {
+    Assessment memory assessment = getAssessment(tokenId);
+    require(
+      msg.sender == assessment.taxRate.beneficiary,
+      "setBaseTaxRate: only beneficiary"
+    );
+    require(
+      nextTaxRate.beneficiary != address(0),
+      "setBaseTaxRate: beneficiary not set"
+    );
+    assessment.taxRate = nextTaxRate;
+    _assessments[tokenId] = assessment;
+  }
+
+
+  function mint(
+    address newOwner,
+    Perwei memory taxRate,
+    string memory uri
+  ) public payable virtual returns (uint256) {
+    require(msg.value > 0, "mint: not enough ETH");
+    require(taxRate.beneficiary != address(0), "mint: beneficiary not set");
+
+    uint256 tokenId = _tokenIds.current();
+    _owners[tokenId] = newOwner;//msg.sender;
+    _setTokenURI(tokenId, uri);
+    _tokenIds.increment();
+
+    Assessment memory assessment = Assessment(
+      msg.sender,
+      block.number,
+      msg.value,
+      taxRate
+    );
+    _assessments[tokenId] = assessment;
+
+    emit Transfer(address(0), msg.sender, tokenId);
+    return tokenId;
+  }
+}
